@@ -35,9 +35,10 @@ def main() -> None:
                     values = list(map(int, row[3:-2]))
                     max_num = max(values)
 
-                    new_values = []
-                    for i in range(max_num):
-                        new_values.append([0 for _ in range(ROW_NUM_VALUES)])
+                    if max_num < 1:
+                        continue
+
+                    new_values = [[0] * ROW_NUM_VALUES for _ in range(max_num)]
 
                     for r in range(len(new_values)):
                         for c, value in enumerate(values):
