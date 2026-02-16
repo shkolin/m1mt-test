@@ -14,6 +14,7 @@ logging.basicConfig(filename='app.log', level=logging.DEBUG)
 DEV_API_KEY = os.environ.get('GOOGLE_API_KEY')
 SPREADSHEET_ID = os.environ.get('SPREADSHEET_ID')
 ROW_OFFSET = 1
+ROW_NUM_VALUES = 10
 
 
 def main() -> None:
@@ -21,22 +22,35 @@ def main() -> None:
         with build('sheets', 'v4', developerKey=DEV_API_KEY) as service:
             sheet = service.spreadsheets()
             result = sheet.values().get(spreadsheetId=SPREADSHEET_ID, range='A:O').execute()
-            values = result.get('values', [])
+            rows = result.get('values', [])
 
-            if len(values) > 1:
-                for row_num, row in enumerate(values[ROW_OFFSET:], start=2):
-                    try:
-                        date, regioan, city = row[:3]
-                        long, lat = row[-2:]
-                        row_num_values = list(map(int, row[3:-2]))
-                        row_max_num_value = max(row_num_values)
-                    except ValueError as e:
-                        msg = 'ROW_NUM:%d: Error: %s\n' % (row_num, e)
-                        logger.error(msg)
-                        print(msg)
+            if len(rows) < 1:
+                logger.info('No data found in spreadsheet')
+                return
+
+            new_rows = []
+
+            for row_num, row in enumerate(rows[ROW_OFFSET:], start=2):
+                try:
+                    values = list(map(int, row[3:-2]))
+                    max_num = max(values)
+
+                    new_values = []
+                    for i in range(max_num):
+                        new_values.append([0 for _ in range(ROW_NUM_VALUES)])
+
+                    for r in range(len(new_values)):
+                        for c, value in enumerate(values):
+                            if value >= r + 1:
+                                new_values[r][c] = 1 if values[c] > 0 else 0
+
+                    for values in new_values:
+                        new_rows.append([*row[:3], *values, *row[-2:]])
+
+                except ValueError as e:
+                    logger.error('ROW_NUM:%d: Error: %s\n' % row_num, e)
     except HttpError as e:
         logger.error('%s', e)
-        print(str(e))
 
 
 if __name__ == '__main__':
