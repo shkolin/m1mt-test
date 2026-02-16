@@ -1,0 +1,9 @@
+[tool.ruff]
+line-length = 119
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint.isort]
+force-single-line = true
+# default-section = "standard-library"

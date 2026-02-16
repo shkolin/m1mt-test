@@ -1,0 +1,4 @@
+.DS_Store
+.zed/
+__pycache__/
+venv/
