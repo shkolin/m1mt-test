@@ -2,3 +2,5 @@
 .zed/
 __pycache__/
 venv/
+.env
+*.log
