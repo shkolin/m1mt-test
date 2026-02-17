@@ -17,8 +17,7 @@ logging.basicConfig(filename='app.log', level=logging.DEBUG)
 
 ROW_OFFSET = 1
 ROW_NUM_VALUES = 10
-RANGE = 'A:O'
-
+SHEET_RANGE_NAME = 'A:O'
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
 ]
@@ -48,7 +47,7 @@ def get_spreadsheet_data(service: Any, spreadsheet_id: str) -> list:
             service.values()
             .get(
                 spreadsheetId=spreadsheet_id,
-                range=RANGE,
+                range=SHEET_RANGE_NAME,
             )
             .execute()
         )
@@ -62,7 +61,7 @@ def update_spreadsheet(service: Any, spreadsheet_id: str, dataset: list) -> None
     try:
         service.values().update(
             spreadsheetId=spreadsheet_id,
-            range=RANGE,
+            range=SHEET_RANGE_NAME,
             valueInputOption='RAW',
             body={'values': dataset},
         ).execute()
@@ -70,13 +69,32 @@ def update_spreadsheet(service: Any, spreadsheet_id: str, dataset: list) -> None
         service.batchUpdate(
             spreadsheetId=spreadsheet_id,
             body={
-                'requests': {
-                    'repeatCell': {
-                        'range': {'sheetId': 0, 'startRowIndex': 0, 'endRowIndex': 1},
-                        'cell': {'userEnteredFormat': {'textFormat': {'bold': True}}},
-                        'fields': 'userEnteredFormat.textFormat.bold',
-                    }
-                }
+                'requests': [
+                    {
+                        'updateSheetProperties': {
+                            'properties': {'sheetId': 0, 'gridProperties': {'frozenRowCount': 1}},
+                            'fields': 'gridProperties.frozenRowCount',
+                        }
+                    },
+                    {
+                        'repeatCell': {
+                            'range': {'sheetId': 0, 'startRowIndex': 0, 'endRowIndex': 1},
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'textFormat': {'bold': True},
+                                    'borders': {
+                                        'bottom': {
+                                            'style': 'SOLID_MEDIUM',
+                                            'width': 3,
+                                            'color': {'red': 0.6, 'green': 0.6, 'blue': 0.6},
+                                        }
+                                    },
+                                }
+                            },
+                            'fields': 'userEnteredFormat.textFormat.bold',
+                        }
+                    },
+                ]
             },
         ).execute()
     except HttpError as e:
@@ -101,6 +119,35 @@ def get_credentials() -> Credentials | None:
     return creds
 
 
+def process_dataset(rows: list[list[Any]]) -> list[list[Any]]:
+    new_dataset = []
+
+    # sheet header
+    new_dataset.append(rows[0])
+
+    for row_num, row in enumerate(rows[ROW_OFFSET:], start=2):
+        try:
+            values = list(map(int, row[3:-2]))
+            max_num = max(values)
+
+            if max_num < 1:
+                continue
+
+            new_values = [[0] * ROW_NUM_VALUES for _ in range(max_num)]
+
+            for r in range(len(new_values)):
+                for c, value in enumerate(values):
+                    new_values[r][c] = 1 if value >= r + 1 else 0
+
+            for values in new_values:
+                new_dataset.append([*row[:3], *values, *row[-2:]])
+
+        except ValueError as e:
+            error('ROW_NUM:%d: Error: %s\n' % (row_num, e))
+
+    return new_dataset
+
+
 def main(argv: list[str]) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--spreadsheet_id')
@@ -117,7 +164,7 @@ def main(argv: list[str]) -> None:
         return
 
     try:
-        with build('sheets', 'v4', credentials=creds, cache_discovery=False) as resource:
+        with build('sheets', 'v4', credentials=creds) as resource:
             service = resource.spreadsheets()
             rows = get_spreadsheet_data(service, args.spreadsheet_id)
 
@@ -125,29 +172,7 @@ def main(argv: list[str]) -> None:
                 error('No data found in spreadsheet')
                 return
 
-            new_dataset = []
-            new_dataset.append(rows[0])
-
-            for row_num, row in enumerate(rows[ROW_OFFSET:], start=2):
-                try:
-                    values = list(map(int, row[3:-2]))
-                    max_num = max(values)
-
-                    if max_num < 1:
-                        continue
-
-                    new_values = [[0] * ROW_NUM_VALUES for _ in range(max_num)]
-
-                    for r in range(len(new_values)):
-                        for c, value in enumerate(values):
-                            new_values[r][c] = 1 if value >= r + 1 else 0
-
-                    for values in new_values:
-                        new_dataset.append([*row[:3], *values, *row[-2:]])
-
-                except ValueError as e:
-                    error('ROW_NUM:%d: Error: %s\n' % (row_num, e))
-
+            new_dataset = process_dataset(rows)
             spreadsheet_id = create_spreadsheet(service, 'New Dataset %s' % datetime.datetime.now())
             update_spreadsheet(service, spreadsheet_id, new_dataset)
     except MutualTLSChannelError as e:
