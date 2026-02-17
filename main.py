@@ -1,34 +1,107 @@
+import argparse
 import logging
 import os
+import sys
+from typing import Any
 
-from dotenv import load_dotenv
+from google.auth.exceptions import MutualTLSChannelError
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='app.log', level=logging.DEBUG)
 
-
-DEV_API_KEY = os.environ.get('GOOGLE_API_KEY')
-SPREADSHEET_ID = os.environ.get('SPREADSHEET_ID')
 ROW_OFFSET = 1
 ROW_NUM_VALUES = 10
 
+SCOPES = [
+    'https://www.googleapis.com/auth/spreadsheets',
+]
 
-def main() -> None:
+
+def error(msg: str, silent: bool = False) -> None:
+    logger.error(msg)
+    if not silent:
+        print(msg)
+
+
+def create_spreadsheet(service: Any, title: str) -> Any:
     try:
-        with build('sheets', 'v4', developerKey=DEV_API_KEY) as service:
-            sheet = service.spreadsheets()
-            result = sheet.values().get(spreadsheetId=SPREADSHEET_ID, range='A:O').execute()
-            rows = result.get('values', [])
+        spreadsheet = service.create(
+            body={'properties': {'title': title}},
+            fields='spreadsheetId',
+        ).execute()
+        return spreadsheet['spreadsheetId']
+    except HttpError as e:
+        error('Failed to create spreadsheet: %s\n' % e)
+        return
+
+
+def get_spreadsheet_data(service: Any, spreadsheet_id: str) -> list:
+    try:
+        result = (
+            service.values()
+            .get(
+                spreadsheetId=spreadsheet_id,
+                range='A:O',
+            )
+            .execute()
+        )
+        return result.get('values', [])
+    except HttpError as e:
+        error('Failed to get data: %s\n' % e)
+        return []
+
+
+def update_spreadsheet(service: Any, spreadsheet_id: str, dataset: list) -> None:
+    try:
+        service.values().update(
+            spreadsheetId=spreadsheet_id,
+            range='A:O',
+            valueInputOption='RAW',
+            body={'values': dataset},
+        ).execute()
+    except HttpError as e:
+        error('Failed to update data: %s\n' % e)
+
+
+def main(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--spreadsheet_id')
+    args = parser.parse_args(argv[1:])
+
+    if not args.spreadsheet_id:
+        print('Spreadsheet ID is not provided\n')
+        return
+
+    creds = None
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+
+    with open('token.json', 'w') as token:
+        token.write(creds.to_json())
+
+    try:
+        with build('sheets', 'v4', credentials=creds, cache_discovery=False) as resource:
+            service = resource.spreadsheets()
+            rows = get_spreadsheet_data(service, args.spreadsheet_id)
 
             if len(rows) < 1:
-                logger.info('No data found in spreadsheet')
+                error('No data found in spreadsheet')
                 return
 
-            new_rows = []
+            new_dataset = []
+            new_dataset.append(rows[0])
 
             for row_num, row in enumerate(rows[ROW_OFFSET:], start=2):
                 try:
@@ -45,13 +118,16 @@ def main() -> None:
                             new_values[r][c] = 1 if value >= r + 1 else 0
 
                     for values in new_values:
-                        new_rows.append([*row[:3], *values, *row[-2:]])
+                        new_dataset.append([*row[:3], *values, *row[-2:]])
 
                 except ValueError as e:
-                    logger.error('ROW_NUM:%d: Error: %s\n' % row_num, e)
-    except HttpError as e:
-        logger.error('%s', e)
+                    error('ROW_NUM:%d: Error: %s\n' % (row_num, e))
+
+            spreadsheet_id = create_spreadsheet(service, 'Вихідні дані')
+            update_spreadsheet(service, spreadsheet_id, new_dataset)
+    except MutualTLSChannelError as e:
+        error(str(e))
 
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv)
