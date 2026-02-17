@@ -6,4 +6,6 @@ quote-style = "single"
 
 [tool.ruff.lint.isort]
 force-single-line = true
-# default-section = "standard-library"
+
+[tool.mypy]
+ignore_missing_imports = true
