@@ -42,8 +42,7 @@ def main() -> None:
 
                     for r in range(len(new_values)):
                         for c, value in enumerate(values):
-                            if value >= r + 1:
-                                new_values[r][c] = 1 if values[c] > 0 else 0
+                            new_values[r][c] = 1 if value >= r + 1 else 0
 
                     for values in new_values:
                         new_rows.append([*row[:3], *values, *row[-2:]])
