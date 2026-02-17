@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import logging
 import os
 import sys
@@ -16,6 +17,7 @@ logging.basicConfig(filename='app.log', level=logging.DEBUG)
 
 ROW_OFFSET = 1
 ROW_NUM_VALUES = 10
+RANGE = 'A:O'
 
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
@@ -46,7 +48,7 @@ def get_spreadsheet_data(service: Any, spreadsheet_id: str) -> list:
             service.values()
             .get(
                 spreadsheetId=spreadsheet_id,
-                range='A:O',
+                range=RANGE,
             )
             .execute()
         )
@@ -60,23 +62,28 @@ def update_spreadsheet(service: Any, spreadsheet_id: str, dataset: list) -> None
     try:
         service.values().update(
             spreadsheetId=spreadsheet_id,
-            range='A:O',
+            range=RANGE,
             valueInputOption='RAW',
             body={'values': dataset},
+        ).execute()
+
+        service.batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={
+                'requests': {
+                    'repeatCell': {
+                        'range': {'sheetId': 0, 'startRowIndex': 0, 'endRowIndex': 1},
+                        'cell': {'userEnteredFormat': {'textFormat': {'bold': True}}},
+                        'fields': 'userEnteredFormat.textFormat.bold',
+                    }
+                }
+            },
         ).execute()
     except HttpError as e:
         error('Failed to update data: %s\n' % e)
 
 
-def main(argv: list[str]) -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--spreadsheet_id')
-    args = parser.parse_args(argv[1:])
-
-    if not args.spreadsheet_id:
-        print('Spreadsheet ID is not provided\n')
-        return
-
+def get_credentials() -> Credentials | None:
     creds = None
     if os.path.exists('token.json'):
         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
@@ -90,6 +97,24 @@ def main(argv: list[str]) -> None:
 
     with open('token.json', 'w') as token:
         token.write(creds.to_json())
+
+    return creds
+
+
+def main(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--spreadsheet_id')
+    args = parser.parse_args(argv[1:])
+
+    if not args.spreadsheet_id:
+        print('Spreadsheet ID is not provided\n')
+        return
+
+    creds = get_credentials()
+
+    if not creds:
+        print('Credentials not found')
+        return
 
     try:
         with build('sheets', 'v4', credentials=creds, cache_discovery=False) as resource:
@@ -123,7 +148,7 @@ def main(argv: list[str]) -> None:
                 except ValueError as e:
                     error('ROW_NUM:%d: Error: %s\n' % (row_num, e))
 
-            spreadsheet_id = create_spreadsheet(service, 'Вихідні дані')
+            spreadsheet_id = create_spreadsheet(service, 'New Dataset %s' % datetime.datetime.now())
             update_spreadsheet(service, spreadsheet_id, new_dataset)
     except MutualTLSChannelError as e:
         error(str(e))
