@@ -160,6 +160,9 @@ def export_dataset_to_arcgis(data: list[list[Any]]) -> None:
     item = gis.content.get(GIS_FEATURE_LAYER_ID)
     layer = item.layers[0]
 
+    # if object_ids := [f.attributes['OBJECTID'] for f in layer.query(where='1=1').features]:
+    #     layer.edit_features(deletes=object_ids)
+
     attributes = [
         'date',
         'region',
