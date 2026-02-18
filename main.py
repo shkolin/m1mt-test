@@ -5,8 +5,6 @@ import os
 import sys
 from typing import Any
 
-import numpy as np
-import pandas as pd
 from arcgis import GIS
 from dotenv import load_dotenv
 from google.auth.exceptions import MutualTLSChannelError
@@ -135,11 +133,7 @@ def get_credentials() -> Credentials | None:
 
 def process_dataset(rows: list[list[Any]]) -> list[list[Any]]:
     new_dataset = []
-
-    # sheet header
-    new_dataset.append(rows[0])
-
-    for row_num, row in enumerate(rows[ROW_OFFSET:], start=2):
+    for i, row in enumerate(rows[ROW_OFFSET:], start=2):
         try:
             values = list(map(int, row[3:-2]))
             max_num = max(values)
@@ -155,52 +149,49 @@ def process_dataset(rows: list[list[Any]]) -> list[list[Any]]:
 
             for values in new_values:
                 new_dataset.append([*row[:3], *values, *list(map(to_float, row[-2:]))])
-
-            if row_num == 10:
-                break
         except ValueError as e:
-            error('ROW_NUM:%d: Error: %s\n' % (row_num, e))
+            error('ROW_NUM:%d: Error: %s\n' % (i, e))
 
     return new_dataset
 
 
-def export_dataset_to_arcgis(data: list[list[Any]], columns: list[str]) -> None:
+def export_dataset_to_arcgis(data: list[list[Any]]) -> None:
     gis = GIS('https://www.arcgis.com', token=GIS_API_TOKEN)
     item = gis.content.get(GIS_FEATURE_LAYER_ID)
     layer = item.layers[0]
 
-    df = pd.DataFrame(data, columns=np.array(columns))
+    attributes = [
+        'date',
+        'region',
+        'city',
+        'value_1',
+        'value_2',
+        'value_3',
+        'value_4',
+        'value_5',
+        'value_6',
+        'value_7',
+        'value_8',
+        'value_9',
+        'value_10',
+        'long',
+        'lat',
+    ]
 
     features = []
-    for _, row in df.iterrows():
+    for row in data:
+        long, lat = row[-2:]
         feature = {
-            'attributes': {
-                'date': row['Дата'],
-                'region': row['Область'],
-                'city': row['Місто'],
-                'value_1': row['Значення 1'],
-                'value_2': row['Значення 2'],
-                'value_3': row['Значення 3'],
-                'value_4': row['Значення 4'],
-                'value_5': row['Значення 5'],
-                'value_6': row['Значення 6'],
-                'value_7': row['Значення 7'],
-                'value_8': row['Значення 8'],
-                'value_9': row['Значення 9'],
-                'value_10': row['Значення 10'],
-                'long': row['long'],
-                'lat': row['lat'],
-            },
+            'attributes': {attributes[i]: value for i, value in enumerate(row)},
             'geometry': {
-                'x': row['long'],
-                'y': row['lat'],
+                'x': long,
+                'y': lat,
                 'spatialReference': {'wkid': 4326},
             },
         }
         features.append(feature)
 
-    result = layer.edit_features(adds=features)
-    print(result)
+    layer.edit_features(adds=features)
 
 
 def main(argv: list[str]) -> None:
@@ -225,11 +216,12 @@ def main(argv: list[str]) -> None:
                 return None
 
             new_dataset = process_dataset(rows)
+            new_dataset.insert(0, rows[0])
             spreadsheet_id = create_spreadsheet(service, 'New Dataset %s' % datetime.datetime.now())
             if spreadsheet_id:
                 update_spreadsheet(service, spreadsheet_id, new_dataset)
 
-        export_dataset_to_arcgis(new_dataset[1:], new_dataset[:1][0])
+        export_dataset_to_arcgis(new_dataset[1:])
     except MutualTLSChannelError as e:
         error(str(e))
 
