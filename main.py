@@ -29,7 +29,7 @@ def error(msg: str, silent: bool = False) -> None:
         print(msg)
 
 
-def create_spreadsheet(service: Any, title: str) -> Any:
+def create_spreadsheet(service: Any, title: str) -> str | None:
     try:
         spreadsheet = service.create(
             body={'properties': {'title': title}},
@@ -154,13 +154,13 @@ def main(argv: list[str]) -> None:
     args = parser.parse_args(argv[1:])
 
     if not args.spreadsheet_id:
-        print('Spreadsheet ID is not provided\n')
+        error('Spreadsheet ID is not provided\n')
         return
 
     creds = get_credentials()
 
     if not creds:
-        print('Credentials not found')
+        error('Credentials not found')
         return
 
     try:
@@ -174,7 +174,8 @@ def main(argv: list[str]) -> None:
 
             new_dataset = process_dataset(rows)
             spreadsheet_id = create_spreadsheet(service, 'New Dataset %s' % datetime.datetime.now())
-            update_spreadsheet(service, spreadsheet_id, new_dataset)
+            if spreadsheet_id:
+                update_spreadsheet(service, spreadsheet_id, new_dataset)
     except MutualTLSChannelError as e:
         error(str(e))
 
