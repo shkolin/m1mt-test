@@ -5,6 +5,10 @@ import os
 import sys
 from typing import Any
 
+import numpy as np
+import pandas as pd
+from arcgis import GIS
+from dotenv import load_dotenv
 from google.auth.exceptions import MutualTLSChannelError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -12,6 +16,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+load_dotenv()
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='app.log', level=logging.DEBUG)
 
@@ -21,12 +26,21 @@ SHEET_RANGE_NAME = 'A:O'
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
 ]
+GIS_FEATURE_LAYER_ID = os.environ.get('GIS_FEATURE_LAYER_ID')
+GIS_API_TOKEN = os.environ.get('GIS_API_TOKEN')
 
 
 def error(msg: str, silent: bool = False) -> None:
     logger.error(msg)
     if not silent:
         print(msg)
+
+
+def to_float(value: str) -> float | None:
+    try:
+        return float(value.replace(',', '.'))
+    except ValueError:
+        return None
 
 
 def create_spreadsheet(service: Any, title: str) -> str | None:
@@ -37,8 +51,8 @@ def create_spreadsheet(service: Any, title: str) -> str | None:
         ).execute()
         return spreadsheet['spreadsheetId']
     except HttpError as e:
-        error('Failed to create spreadsheet: %s\n' % e)
-        return
+        error('Failed to create spreadsheet: %s' % e)
+        return None
 
 
 def get_spreadsheet_data(service: Any, spreadsheet_id: str) -> list:
@@ -53,7 +67,7 @@ def get_spreadsheet_data(service: Any, spreadsheet_id: str) -> list:
         )
         return result.get('values', [])
     except HttpError as e:
-        error('Failed to get data: %s\n' % e)
+        error('Failed to get data: %s' % e)
         return []
 
 
@@ -140,28 +154,66 @@ def process_dataset(rows: list[list[Any]]) -> list[list[Any]]:
                     new_values[r][c] = 1 if value >= r + 1 else 0
 
             for values in new_values:
-                new_dataset.append([*row[:3], *values, *row[-2:]])
+                new_dataset.append([*row[:3], *values, *list(map(to_float, row[-2:]))])
 
+            if row_num == 10:
+                break
         except ValueError as e:
             error('ROW_NUM:%d: Error: %s\n' % (row_num, e))
 
     return new_dataset
 
 
+def export_dataset_to_arcgis(data: list[list[Any]], columns: list[str]) -> None:
+    gis = GIS('https://www.arcgis.com', token=GIS_API_TOKEN)
+    item = gis.content.get(GIS_FEATURE_LAYER_ID)
+    layer = item.layers[0]
+
+    df = pd.DataFrame(data, columns=np.array(columns))
+
+    features = []
+    for _, row in df.iterrows():
+        feature = {
+            'attributes': {
+                'date': row['Дата'],
+                'region': row['Область'],
+                'city': row['Місто'],
+                'value_1': row['Значення 1'],
+                'value_2': row['Значення 2'],
+                'value_3': row['Значення 3'],
+                'value_4': row['Значення 4'],
+                'value_5': row['Значення 5'],
+                'value_6': row['Значення 6'],
+                'value_7': row['Значення 7'],
+                'value_8': row['Значення 8'],
+                'value_9': row['Значення 9'],
+                'value_10': row['Значення 10'],
+                'long': row['long'],
+                'lat': row['lat'],
+            },
+            'geometry': {
+                'x': row['long'],
+                'y': row['lat'],
+                'spatialReference': {'wkid': 4326},
+            },
+        }
+        features.append(feature)
+
+    result = layer.edit_features(adds=features)
+    print(result)
+
+
 def main(argv: list[str]) -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument('--spreadsheet_id')
-    args = parser.parse_args(argv[1:])
+    parser.add_argument('--spreadsheet_id', required=True)
 
-    if not args.spreadsheet_id:
-        error('Spreadsheet ID is not provided\n')
-        return
+    args = parser.parse_args(argv[1:])
 
     creds = get_credentials()
 
     if not creds:
         error('Credentials not found')
-        return
+        return None
 
     try:
         with build('sheets', 'v4', credentials=creds) as resource:
@@ -170,12 +222,14 @@ def main(argv: list[str]) -> None:
 
             if len(rows) < 1:
                 error('No data found in spreadsheet')
-                return
+                return None
 
             new_dataset = process_dataset(rows)
             spreadsheet_id = create_spreadsheet(service, 'New Dataset %s' % datetime.datetime.now())
             if spreadsheet_id:
                 update_spreadsheet(service, spreadsheet_id, new_dataset)
+
+        export_dataset_to_arcgis(new_dataset[1:], new_dataset[:1][0])
     except MutualTLSChannelError as e:
         error(str(e))
 
